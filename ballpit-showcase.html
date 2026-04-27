@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ballpit Background Showcase</title>
+  <style>
+    :root {
+      --page-bg: #f3f4f6;
+      --card-bg: #f8fafc;
+      --text-main: #1f2937;
+      --text-sub: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", Roboto, sans-serif;
+      background: var(--page-bg);
+      display: grid;
+      place-items: center;
+      padding: 28px;
+    }
+
+    .showcase {
+      width: min(1200px, 100%);
+      height: min(740px, calc(100vh - 56px));
+      background: var(--card-bg);
+      border-radius: 28px;
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    #ballpit-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay h1 {
+      margin: 0;
+      color: var(--text-main);
+      font-size: clamp(34px, 4.5vw, 56px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      font-weight: 600;
+    }
+
+    .overlay p {
+      margin: 10px 0 0;
+      color: var(--text-sub);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .reset-btn {
+      position: absolute;
+      z-index: 3;
+      right: 24px;
+      bottom: 24px;
+      width: 52px;
+      height: 52px;
+      border-radius: 999px;
+      border: 0;
+      background: #111827;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+      box-shadow: 0 12px 30px rgba(17, 24, 39, 0.25);
+      transition: transform 0.2s ease;
+    }
+
+    .reset-btn:hover {
+      transform: scale(1.06);
+    }
+  </style>
+</head>
+<body>
+  <section class="showcase" id="showcase">
+    <canvas id="ballpit-canvas" aria-label="Ballpit background animation"></canvas>
+    <div class="overlay">
+      <div>
+        <h1>Ballpit Background</h1>
+        <p>3D Physics Interaction</p>
+      </div>
+    </div>
+    <button class="reset-btn" id="reset-btn" title="Reset animation" aria-label="Reset animation">&#8635;</button>
+  </section>
+
+  <script>
+    (() => {
+      const showcase = document.getElementById("showcase");
+      const canvas = document.getElementById("ballpit-canvas");
+      const resetBtn = document.getElementById("reset-btn");
+      if (!showcase || !canvas || !resetBtn) return;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const config = {
+        count: 150,
+        colors: ["#0f172a", "#1f2937", "#dbeafe", "#bfdbfe", "#60a5fa", "#93c5fd"],
+        gravity: 0.16,
+        friction: 0.9965,
+        wallBounce: 0.9,
+        minSize: 12,
+        maxSize: 42,
+        followCursor: true
+      };
+
+      let width = 1;
+      let height = 1;
+      let dpr = 1;
+      let pileTop = 0;
+      let frameId = 0;
+      let pointerX = 0;
+      let pointerY = 0;
+      let hasPointer = false;
+
+      let balls = [];
+
+      function createBalls() {
+        balls = Array.from({ length: config.count }, (_, i) => {
+          const r = config.minSize + Math.random() * (config.maxSize - config.minSize);
+          return {
+            x: 0,
+            y: 0,
+            vx: (Math.random() - 0.5) * 1.2,
+            vy: (Math.random() - 0.5) * 0.8,
+            r,
+            color: config.colors[i % config.colors.length]
+          };
+        });
+      }
+
+      function seedBalls() {
+        for (const ball of balls) {
+          ball.x = Math.random() * width;
+          ball.y = pileTop + Math.random() * (height - pileTop) * 0.86;
+        }
+      }
+
+      function resize() {
+        const rect = showcase.getBoundingClientRect();
+        width = Math.max(1, Math.floor(rect.width));
+        height = Math.max(1, Math.floor(rect.height));
+        pileTop = height * 0.58;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        pointerX = width * 0.5;
+        pointerY = pileTop + (height - pileTop) * 0.22;
+        seedBalls();
+      }
+
+      function setPointer(x, y) {
+        const rect = showcase.getBoundingClientRect();
+        pointerX = x - rect.left;
+        pointerY = Math.max(pileTop + 8, y - rect.top);
+        hasPointer = true;
+      }
+
+      function onMouseMove(e) {
+        setPointer(e.clientX, e.clientY);
+      }
+
+      function onTouchMove(e) {
+        if (!e.touches || !e.touches.length) return;
+        setPointer(e.touches[0].clientX, e.touches[0].clientY);
+      }
+
+      function onLeave() {
+        hasPointer = false;
+      }
+
+      function collide(a, b) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distSq = dx * dx + dy * dy;
+        const minDist = a.r + b.r;
+        if (distSq === 0 || distSq > minDist * minDist) return;
+
+        const dist = Math.sqrt(distSq);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = minDist - dist;
+
+        a.x -= nx * overlap * 0.5;
+        a.y -= ny * overlap * 0.5;
+        b.x += nx * overlap * 0.5;
+        b.y += ny * overlap * 0.5;
+
+        const rvx = b.vx - a.vx;
+        const rvy = b.vy - a.vy;
+        const velAlongNormal = rvx * nx + rvy * ny;
+        if (velAlongNormal > 0) return;
+
+        const restitution = 0.9;
+        const impulse = -(1 + restitution) * velAlongNormal * 0.5;
+        a.vx -= impulse * nx;
+        a.vy -= impulse * ny;
+        b.vx += impulse * nx;
+        b.vy += impulse * ny;
+      }
+
+      function drawBall(ball) {
+        const shadow = ctx.createRadialGradient(
+          ball.x,
+          ball.y + ball.r * 0.72,
+          ball.r * 0.08,
+          ball.x,
+          ball.y + ball.r * 0.82,
+          ball.r * 0.9
+        );
+        shadow.addColorStop(0, "rgba(15,23,42,0.16)");
+        shadow.addColorStop(1, "rgba(15,23,42,0)");
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.ellipse(ball.x, ball.y + ball.r * 0.78, ball.r * 0.88, ball.r * 0.42, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const body = ctx.createRadialGradient(
+          ball.x - ball.r * 0.34,
+          ball.y - ball.r * 0.36,
+          ball.r * 0.05,
+          ball.x + ball.r * 0.1,
+          ball.y + ball.r * 0.12,
+          ball.r * 1.05
+        );
+        body.addColorStop(0, "rgba(255,255,255,1)");
+        body.addColorStop(0.12, "rgba(255,255,255,0.96)");
+        body.addColorStop(0.45, ball.color);
+        body.addColorStop(0.76, "rgba(148,163,184,0.55)");
+        body.addColorStop(1, "rgba(71,85,105,0.72)");
+
+        ctx.fillStyle = body;
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        const specular = ctx.createRadialGradient(
+          ball.x - ball.r * 0.38,
+          ball.y - ball.r * 0.42,
+          0,
+          ball.x - ball.r * 0.38,
+          ball.y - ball.r * 0.42,
+          ball.r * 0.3
+        );
+        specular.addColorStop(0, "rgba(255,255,255,0.95)");
+        specular.addColorStop(0.25, "rgba(255,255,255,0.35)");
+        specular.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = specular;
+        ctx.beginPath();
+        ctx.arc(ball.x - ball.r * 0.34, ball.y - ball.r * 0.36, ball.r * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.14)";
+        ctx.lineWidth = Math.max(0.5, ball.r * 0.03);
+        ctx.stroke();
+      }
+
+      function animate() {
+        ctx.clearRect(0, 0, width, height);
+
+        if (!hasPointer) {
+          const t = performance.now() * 0.001;
+          pointerX = width * 0.5 + Math.sin(t * 0.8) * width * 0.24;
+          pointerY = pileTop + (height - pileTop) * 0.25 + Math.cos(t * 1.2) * (height - pileTop) * 0.12;
+        }
+
+        for (let i = 0; i < balls.length; i += 1) {
+          const b = balls[i];
+
+          b.vy += config.gravity * (b.r / config.maxSize);
+          b.vx *= config.friction;
+          b.vy *= config.friction;
+
+          if (config.followCursor && i === 0) {
+            b.vx += (pointerX - b.x) * 0.006;
+            b.vy += (pointerY - b.y) * 0.005;
+          }
+
+          b.x += b.vx;
+          b.y += b.vy;
+
+          if (b.x - b.r < 0) {
+            b.x = b.r;
+            b.vx *= -config.wallBounce;
+          } else if (b.x + b.r > width) {
+            b.x = width - b.r;
+            b.vx *= -config.wallBounce;
+          }
+
+          if (b.y - b.r < pileTop) {
+            b.y = pileTop + b.r;
+            b.vy *= -config.wallBounce;
+          } else if (b.y + b.r > height) {
+            b.y = height - b.r;
+            b.vy *= -config.wallBounce;
+          }
+        }
+
+        for (let i = 0; i < balls.length; i += 1) {
+          for (let j = i + 1; j < balls.length; j += 1) {
+            collide(balls[i], balls[j]);
+          }
+        }
+
+        const renderOrder = [...balls].sort((a, b) => a.y - b.y);
+        for (const b of renderOrder) drawBall(b);
+
+        frameId = requestAnimationFrame(animate);
+      }
+
+      function reset() {
+        createBalls();
+        seedBalls();
+      }
+
+      createBalls();
+      resize();
+      animate();
+
+      window.addEventListener("resize", resize);
+      showcase.addEventListener("mousemove", onMouseMove);
+      showcase.addEventListener("touchstart", onTouchMove, { passive: true });
+      showcase.addEventListener("touchmove", onTouchMove, { passive: true });
+      showcase.addEventListener("mouseleave", onLeave);
+      showcase.addEventListener("touchend", onLeave);
+      resetBtn.addEventListener("click", reset);
+
+      window.addEventListener("beforeunload", () => {
+        cancelAnimationFrame(frameId);
+        window.removeEventListener("resize", resize);
+        showcase.removeEventListener("mousemove", onMouseMove);
+        showcase.removeEventListener("touchstart", onTouchMove);
+        showcase.removeEventListener("touchmove", onTouchMove);
+        showcase.removeEventListener("mouseleave", onLeave);
+        showcase.removeEventListener("touchend", onLeave);
+        resetBtn.removeEventListener("click", reset);
+      });
+    })();
+  </script>
+</body>
+</html>
